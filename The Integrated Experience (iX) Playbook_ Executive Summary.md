@@ -8,6 +8,14 @@ Our environment is not a single platform but a collection of interconnected prod
 
 The methodology is an iterative cycle built on Lean and Design Thinking principles. It is powered by the **Jobs to be Done (JTBD)** framework to focus on user outcomes and measured by the **Fit for Purpose (F4P)** framework to ensure our products are truly helping users achieve their goals.
 
+#### **How to Decide Where to Start**
+
+Before the cycle begins, the first step is to **Find the Friction**. When hard data like flow metrics are unavailable, this is a qualitative-first process:
+
+1. **Listen to People:** Use broad **Fit for Purpose (F4P) surveys** and targeted "pain point" interviews to discover which "jobs" (e.g., "migrating a legacy service") are most common and most painful for users.  
+2. **Perform Process Archeology:** Analyze the "data exhaust" from support tickets, chat channels, and incident post-mortems to find recurring themes of frustration.  
+3. **Prioritize:** Use a simple matrix to select a pilot journey that has both high user pain and high strategic impact. The analysis of this first journey will generate your initial set of hard metrics.
+
 #### **The Continuous Improvement Cycle: A 4-Phase Methodology**
 
 **1\. Phase 1: Frame & Empathize**
@@ -16,7 +24,7 @@ The methodology is an iterative cycle built on Lean and Design Thinking principl
 * **High-Level Steps:**  
   * **Frame the Problem:** Use "How Might We...?" questions to turn cross-product challenges into opportunities.  
   * **Conduct Contextual Inquiry:** Observe users in their natural environment ("Gemba") to see how they navigate between different products and teams to get work done.  
-  * **Perform JTBD & Fit for Purpose (F4P) Interviews:** Use structured F4P surveys and JTBD interviews to systematically capture the specific "jobs" (e.g., "migrate a legacy service") and measure how well the current ecosystem supports that purpose.\[1\]  
+  * **Perform JTBD & Fit for Purpose (F4P) Interviews:** Use structured F4P surveys and JTBD interviews to systematically capture the specific "jobs" and measure how well the current ecosystem supports that purpose.\[1\]  
   * **Gather Artifacts:** Collect scripts, runbooks, and wikis that show how users currently bridge the gaps between different internal products.
 
 **2\. Phase 2: Map & Diagnose**
@@ -25,8 +33,8 @@ The methodology is an iterative cycle built on Lean and Design Thinking principl
 * **High-Level Steps:**  
   * **Create Integrated Journey Maps:** Visualize the end-to-end steps, tools, and emotional state of a user as they interact with multiple products and teams to complete a job.  
   * **Develop Service Blueprints:** Connect the user's journey (frontstage) to the hidden internal processes, handoffs between product teams, and governance steps (backstage) that cause friction.\[2, 3\]  
-  * **Analyze through JTBD Lens:** For each step in the journey, ask: "Does this action help the user make progress on their job, or is it organizational waste caused by product seams?".\[4\]  
-  * **Perform Root Cause Analysis:** Use the "5 Whys" technique to trace symptoms (e.g., slow migration) back to their systemic source (e.g., incompatible artifact formats between two platform products).\[4\]
+  * **Manually Generate Initial Metrics:** If no data exists, use the journey map to manually calculate your first Flow Time and Flow Efficiency metrics by asking users about durations and wait times.  
+  * **Perform Root Cause Analysis:** Use the "5 Whys" technique to trace symptoms back to their systemic source.\[4\]
 
 **3\. Phase 3: Ideate & Co-Create**
 
