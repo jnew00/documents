@@ -299,6 +299,134 @@ sharpen the schema, not to correct pages one by one.
 
 ---
 
+## Environment addendum — regulated Windows VDI, agent-mode Claude
+
+This deployment runs on a locked-down Windows 11 VDI with Claude Code in
+non-interactive agent mode (`claude -p`), Copilot available through an MCP, and
+local embedding models on hand. That changes some defaults.
+
+### Non-interactive agent mode changes the weight distribution
+
+`claude -p` gets a fresh context every invocation — there is no long-running
+conversation to carry conventions. Consequences:
+
+- **The schema file does ALL the heavy lifting.** In interactive use you can
+  correct drift mid-session; in `-p` mode the `AGENTS.md`/`CLAUDE.md` at the
+  vault root is the only memory of how to behave. Invest in it early and
+  sharpen it every time an ingest comes out sloppy.
+- **Wrap the three operations as scripts.** Make `ingest.cmd`, `query.cmd`,
+  and `lint.cmd` (or PowerShell equivalents) that shell out to `claude -p`
+  with a fixed prompt template, e.g.
+  `claude -p "Ingest raw/inbox/<file> per AGENTS.md. Touch every page the
+  workflow requires, update index.md and log.md."` Fixed prompts + a strong
+  schema file = consistent results across stateless invocations.
+- **Verify the fan-out.** A stateless agent under a token budget will be
+  tempted to summarize the source and skip the cross-linking. The lint
+  operation is the check; run it after every few ingests, not annually.
+- **Copilot-via-MCP is a second reader, not a second writer.** One agent owns
+  `wiki/` writes (Claude). Two writers with different habits will corrode the
+  conventions. Use Copilot for queries/lookups if convenient.
+
+### Windows specifics
+
+- Paths in wikilinks stay forward-slash (`[[wiki/people/jane-doe]]`) — they're
+  text conventions, not filesystem paths. Scripts use whatever the shell wants.
+- No cron/launchd. If scheduled ingest is wanted and Task Scheduler is allowed,
+  use it; otherwise on-demand scripts are fine — this pattern degrades
+  gracefully to manual, unlike RAG pipelines.
+- Mind where the vault lives. VDI profiles can be ephemeral or roaming; put the
+  vault somewhere persistent and, if possible, under version control (even a
+  local-only git repo gives you history and an undo button for LLM mistakes).
+
+### Regulated-environment cautions
+
+- **The vault concentrates what was diffuse.** Meeting notes scattered across
+  folders are low-risk; a single well-indexed dossier of projects, decisions,
+  and colleagues is a different artifact. Keep it inside the corporate
+  boundary, follow data-classification policy, and don't ingest anything you
+  wouldn't want surfaced in a review of your workstation.
+- **People pages: professional facts only.** Role, team, expertise, working
+  relationships, project history. No performance opinions, no personal
+  observations. Write every people page as if the person will read it —
+  at work, they might.
+- **Never store credentials, tokens, or client-confidential excerpts** in
+  either `raw/` or `wiki/`. The wiki should cite where a document lives, not
+  reproduce restricted content.
+
+---
+
+## Seeding an existing corpus
+
+Starting with years of accumulated material (projects, meeting notes, colleague
+context, documents), the failure mode is bulk-ingesting everything in week one —
+you get 400 mediocre pages, no trustworthy index, and no habit. Instead:
+
+1. **Seed the spine by hand-picking, not sweeping.** First ingests: the 5–10
+   *active* projects, the 10–20 people you interact with weekly, and the
+   handful of documents you actually re-open. This creates the hub pages that
+   everything else links into.
+2. **Backfill on demand.** When a query touches something not yet ingested,
+   ingest it then. Demand-driven backfill keeps effort proportional to value.
+3. **Meeting notes are a stream, not a backlog.** Ingest new ones as they
+   happen (this is the habit that keeps the wiki alive). Backfill old ones
+   only for the seeded projects.
+4. **Batch small, lint between batches.** 3–5 sources per `claude -p` run,
+   then a lint pass. Stateless agents drift; catch it early.
+
+### External knowledge bases (Confluence, SharePoint, and the like)
+
+Do **not** try to mirror or bulk-index a corporate KB into the vault — that's
+someone else's corpus, it changes without you, and mirroring it rebuilds the
+RAG problem this pattern exists to avoid. Instead:
+
+- The wiki **cites, it doesn't clone.** An entity or project page links out:
+  `Source of truth: <KB name> → <space/page title>`. The wiki holds your
+  *understanding* of the KB content, not a copy of it.
+- When a specific KB page matters enough to reason over, export/copy **that
+  page** into `raw/docs/` and ingest it like any other source — a deliberate,
+  one-page-at-a-time act of curation.
+- If you don't know what a KB contains: ask the agent to ingest its *table of
+  contents or space index* as a single source. That produces a map page in the
+  wiki telling you what exists and where — usually all you need.
+
+---
+
+## Integrating with an existing tool (SQLite + vectors already in place)
+
+If you already run a local tool with a SQLite database and a working embedding
+pipeline, the wiki should plug into it as a **read-only viewer and search
+head**. This is the "add a viewer later" from the Obsidian section — arriving
+early because the infrastructure is already paid for.
+
+**The one rule: files are the source of truth; the database is a derived
+index.** You must be able to delete the index tables and rebuild them from the
+markdown with zero loss. The moment wiki content lives *only* in the DB, the
+pattern is broken.
+
+Concretely:
+
+- **Index table** — one row per wiki page: path, type (from frontmatter),
+  title, one-line summary, `updated` date, embedding vector. Upsert on a
+  sweep of `wiki/` (a file-hash or mtime manifest makes re-runs cheap); delete
+  rows whose file vanished.
+- **Embed the whole page or summary-plus-headings, not fine-grained chunks.**
+  Wiki pages are already the LLM's own well-titled, well-summarized units —
+  they don't need the aggressive chunking raw documents do. Search resolves to
+  a *page*, and the page is readable on its own.
+- **Display panel** — render the markdown; resolve `[[wikilinks]]` as
+  navigation between pages (a link becomes a lookup by path/title). Search box
+  goes vector or keyword+vector over the index table. This gives the
+  glance-and-go surface without a new app.
+- **Keep it read-only.** Edits flow through the agent's ingest/lint workflows
+  so conventions, cross-links, and the log stay consistent. The tool displays;
+  the LLM writes.
+- **Expose the same search to the agent** if convenient (CLI subcommand or
+  MCP tool): at scale, "query the index, then read the pages it returns" beats
+  re-reading `index.md` each stateless invocation. The wiki stays the thing
+  being read — search is just a faster way in.
+
+---
+
 ## Starter prompt for the agent
 
 > Read `LLM-WIKI-SETUP.md`. Set up an LLM Wiki in this directory following it:
@@ -307,6 +435,19 @@ sharpen the schema, not to correct pages one by one.
 > stop and show me the structure before we ingest anything. You own everything
 > under `wiki/`; you never edit `raw/`. Cross-link aggressively and mark any
 > ungrounded claim as an inference.
+
+Tailored to this environment, the first session's version:
+
+> Read `LLM-WIKI-SETUP.md` in full, including the environment addendum. Set up
+> an LLM Wiki here for my work context: projects, meeting notes, colleagues,
+> documents, and pointers into corporate knowledge bases. Create the folder
+> skeleton; write `AGENTS.md` covering the layout, conventions, the three
+> workflows, the regulated-environment rules (people pages professional-facts-
+> only, no credentials or restricted excerpts, cite KBs don't clone them); add
+> a one-line `CLAUDE.md` pointing at it. Create `ingest`, `query`, and `lint`
+> wrapper scripts that invoke `claude -p` with fixed prompt templates. Init a
+> local git repo. Then stop and show me the structure. Integration with my
+> existing SQLite/vector tool comes later — files first.
 
 ---
 
