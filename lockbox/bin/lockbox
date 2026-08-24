@@ -1,0 +1,153 @@
+#!/bin/zsh
+# lockbox — AES-256 encrypt/decrypt files and folders with the system openssl.
+# Usage: lockbox lock <path>...
+#        lockbox unlock <path>...
+#        lockbox setkey | forgetkey
+#
+# Output is plain `openssl enc` format, so anything encrypted here can be
+# decrypted on any Mac or Linux box with:
+#   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha512 -in FILE.enc -out FILE
+
+emulate -L zsh
+set -u
+
+OPENSSL=/usr/bin/openssl          # system LibreSSL, present on every Mac
+CIPHER=(-aes-256-cbc -pbkdf2 -iter 600000 -md sha512)
+KEYCHAIN_SERVICE=lockbox
+KEYCHAIN_ACCOUNT=passphrase
+
+notify() { osascript -e "display notification \"$2\" with title \"Lockbox\" subtitle \"$1\"" >/dev/null 2>&1 }
+
+die() {
+  osascript -e "display dialog \"$1\" with title \"Lockbox\" buttons {\"OK\"} default button 1 with icon stop" >/dev/null 2>&1
+  print -u2 "lockbox: $1"
+  exit 1
+}
+
+ask() {  # ask <prompt>  -> passphrase on stdout, empty if cancelled
+  osascript -e "display dialog \"$1\" default answer \"\" with title \"Lockbox\" with hidden answer buttons {\"Cancel\",\"OK\"} default button 2" \
+    -e 'text returned of result' 2>/dev/null
+}
+
+keychain_get() { security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" -w 2>/dev/null }
+
+keychain_set() {
+  security add-generic-password -U -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" -w "$1" \
+    -D "lockbox passphrase" -j "Shared passphrase used by the Lockbox Quick Actions" 2>/dev/null
+}
+
+get_pass() {  # get_pass <lock|unlock>
+  local mode=$1 pass confirm saved
+  if [[ -n ${LOCKBOX_PASS:-} ]]; then print -r -- "$LOCKBOX_PASS"; return 0; fi
+  saved=$(keychain_get)
+  if [[ -n $saved ]]; then print -r -- "$saved"; return 0; fi
+
+  pass=$(ask "Passphrase:")
+  [[ -z $pass ]] && exit 0   # cancelled
+
+  if [[ $mode == lock ]]; then
+    confirm=$(ask "Confirm passphrase:")
+    [[ $pass != $confirm ]] && die "Passphrases did not match. Nothing was encrypted."
+  fi
+  print -r -- "$pass"
+}
+
+unique_path() {  # avoid clobbering an existing file/folder
+  local p=$1 base ext n=1
+  [[ ! -e $p ]] && { print -r -- "$p"; return }
+  if [[ $p == *.tar.gz ]]; then base=${p%.tar.gz}; ext=.tar.gz
+  elif [[ ${p:t} == *.* ]]; then base=${p%.*}; ext=.${p##*.}
+  else base=$p; ext=""; fi
+  while [[ -e ${base}-${n}${ext} ]]; do (( n++ )); done
+  print -r -- "${base}-${n}${ext}"
+}
+
+lock_one() {
+  local src=$1 pass=$2 out tmp
+  [[ -e $src ]] || die "Not found: $src"
+
+  if [[ -d $src ]]; then
+    out=$(unique_path "${src:h}/${src:t}.tar.gz.enc")
+    tmp=$(mktemp -t lockbox) || die "Could not create a temp file."
+    tar -czf "$tmp" -C "${src:h}" "${src:t}" \
+      || { rm -f "$tmp"; die "Could not archive folder: ${src:t}" }
+    $OPENSSL enc $CIPHER -salt -in "$tmp" -out "$out" -pass fd:3 3<<<"$pass" \
+      || { rm -f "$tmp" "$out"; die "Encryption failed for ${src:t}" }
+    rm -f "$tmp"
+  else
+    out=$(unique_path "${src}.enc")
+    $OPENSSL enc $CIPHER -salt -in "$src" -out "$out" -pass fd:3 3<<<"$pass" \
+      || { rm -f "$out"; die "Encryption failed for ${src:t}" }
+  fi
+  print -r -- "${out:t}"
+}
+
+unlock_one() {
+  local src=$1 pass=$2 out tmp dest
+  [[ -f $src ]] || die "Not a file: $src"
+  [[ $src == *.enc ]] || die "Not a .enc file: ${src:t}"
+
+  tmp=$(mktemp -t lockbox) || die "Could not create a temp file."
+  if ! $OPENSSL enc -d $CIPHER -in "$src" -out "$tmp" -pass fd:3 3<<<"$pass" 2>/dev/null; then
+    rm -f "$tmp"
+    die "Wrong passphrase, or ${src:t} is not a Lockbox file."
+  fi
+
+  out=${src%.enc}
+  if [[ $out == *.tar.gz ]]; then
+    dest=$(unique_path "${out%.tar.gz}")
+    mkdir -p "$dest" || { rm -f "$tmp"; die "Could not create ${dest:t}" }
+    if ! tar -xzf "$tmp" -C "$dest" 2>/dev/null; then
+      rm -f "$tmp"; rmdir "$dest" 2>/dev/null
+      die "Decrypted, but the archive would not extract: ${src:t}"
+    fi
+    rm -f "$tmp"
+    # tar wrote a single top-level dir inside dest; hoist it if so
+    local -a inner; inner=("$dest"/*(ND))
+    if (( ${#inner} == 1 )) && [[ -d ${inner[1]} && ${inner[1]:t} == ${dest:t} ]]; then
+      mv "${inner[1]}" "${dest}.tmp$$" && rmdir "$dest" && mv "${dest}.tmp$$" "$dest"
+    fi
+    print -r -- "${dest:t}"
+  else
+    dest=$(unique_path "$out")
+    mv "$tmp" "$dest" || { rm -f "$tmp"; die "Could not write ${dest:t}" }
+    chmod 644 "$dest"
+    print -r -- "${dest:t}"
+  fi
+}
+
+cmd=${1:-}
+(( $# )) && shift
+
+case $cmd in
+  setkey)
+    p=$(ask "Passphrase to remember in your Keychain:")
+    [[ -z $p ]] && exit 0
+    c=$(ask "Confirm passphrase:")
+    [[ $p != $c ]] && die "Passphrases did not match."
+    keychain_set "$p" && notify "Keychain" "Passphrase saved. Lockbox will stop asking."
+    exit 0 ;;
+  forgetkey)
+    security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1
+    notify "Keychain" "Saved passphrase removed. Lockbox will ask each time."
+    exit 0 ;;
+  lock|unlock) ;;
+  *) print -u2 "usage: lockbox {lock|unlock} <path>... | lockbox {setkey|forgetkey}"; exit 2 ;;
+esac
+
+(( $# )) || die "No files were passed to Lockbox."
+
+pass=$(get_pass "$cmd")
+[[ -z $pass ]] && exit 0
+
+typeset -a done_names
+for f in "$@"; do
+  f=${f%/}
+  if [[ $cmd == lock ]]; then out=$(lock_one "$f" "$pass") || exit 1
+  else out=$(unlock_one "$f" "$pass") || exit 1; fi
+  done_names+=("$out")
+done
+
+verb=$([[ $cmd == lock ]] && print Encrypted || print Decrypted)
+if (( ${#done_names} == 1 )); then notify "$verb" "${done_names[1]}"
+else notify "$verb" "${#done_names} items"; fi
